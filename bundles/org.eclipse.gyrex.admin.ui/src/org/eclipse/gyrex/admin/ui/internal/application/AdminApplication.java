@@ -47,7 +47,10 @@ import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Label;
+import org.eclipse.swt.widgets.Listener;
+import org.eclipse.swt.widgets.ProgressBar;
 import org.eclipse.swt.widgets.Shell;
 
 import org.osgi.framework.Version;
@@ -70,6 +73,8 @@ public class AdminApplication implements IEntryPoint, IAdminUi {
 	private static final int CENTER_AREA_WIDTH = 998;
 
 	private static final Logger LOG = LoggerFactory.getLogger(AdminApplication.class);
+
+	private static ProgressBar progressBar;
 
 	private static Label createHeadlineLabel(final Composite parent, final String text) {
 		final Label label = new Label(parent, SWT.NONE);
@@ -124,14 +129,28 @@ public class AdminApplication implements IEntryPoint, IAdminUi {
 		});
 	}
 
+	public static boolean setProgressBarUnvisible(final Boolean unvisible) {
+		if (unvisible) {
+			progressBar.setVisible(false);
+			return false;
+		}
+		progressBar.setVisible(true);
+		return true;
+	}
+
 	private Composite centerArea;
 	private NavigationBar navigation;
 	private Composite navBar;
 	private final Map<String, AdminPage> pagesById = new HashMap<String, AdminPage>();
 	private AdminPage currentPage;
 	private Image logo;
+
 	private Composite filterContainer;
+
 	private Composite headerCenterArea;
+
+	private final Display mDisplay = new Display();
+	private final Shell mShell = createMainShell(mDisplay);
 
 	private void activate(final AdminPage page, final PageContribution contribution, String[] args) {
 		// TODO: should switch to using a StackLayout and not disposing children every time
@@ -144,7 +163,7 @@ public class AdminApplication implements IEntryPoint, IAdminUi {
 		}
 
 		// initialize arguments (allows safe use within this method as well as for API contract)
-		if (args == null || args.length == 0) {
+		if ((args == null) || (args.length == 0)) {
 			args = new String[] { contribution.getId() };
 		}
 
@@ -194,7 +213,7 @@ public class AdminApplication implements IEntryPoint, IAdminUi {
 		final FormData data = new FormData();
 		data.top = new FormAttachment(topAttachment, 0, SWT.BOTTOM);
 		data.bottom = new FormAttachment(bottomAttachment, -10, SWT.TOP);
-		data.left = new FormAttachment(50, -CENTER_AREA_WIDTH / 2 + 10);
+		data.left = new FormAttachment(50, (-CENTER_AREA_WIDTH / 2) + 10);
 		data.width = CENTER_AREA_WIDTH - 10;
 		return data;
 	}
@@ -265,6 +284,19 @@ public class AdminApplication implements IEntryPoint, IAdminUi {
 		label.setData(WidgetUtil.CUSTOM_VARIANT, "footerLabel");
 		label.setText("Admin Console " + getVersion());
 		label.setLayoutData(createFooterLabelFormData(footer));
+		label.addListener(SWT.MouseDown, new ProgressAreaListener(mShell));
+
+		progressBar = new ProgressBar(footer, SWT.HORIZONTAL | SWT.INDETERMINATE | SWT.SMOOTH);
+		progressBar.setData(WidgetUtil.CUSTOM_VARIANT, "progresBar");
+		progressBar.setLayoutData(createFooterProgressBarFormData(footer));
+		progressBar.setVisible(false);
+		progressBar.addListener(SWT.MouseDown, new Listener() {
+			@Override
+			public void handleEvent(final Event event) {
+				final ProgressStatusPopupDialog popDialog = new ProgressStatusPopupDialog(mShell, "PopupDialog", null);
+				popDialog.open();
+			}
+		});
 		return footer;
 	}
 
@@ -281,6 +313,19 @@ public class AdminApplication implements IEntryPoint, IAdminUi {
 		final FormData data = new FormData();
 		data.top = new FormAttachment(50, -10);
 		data.right = new FormAttachment(100, -15);
+		return data;
+	}
+
+	/**
+	 * @param adminApplication
+	 * @return
+	 */
+	private FormData createFooterProgressBarFormData(final Composite footer) {
+		final FormData data = new FormData();
+		data.top = new FormAttachment(40, 0);
+		data.left = new FormAttachment(0, 15);
+		data.bottom = new FormAttachment(60, 0);
+		data.right = new FormAttachment(20, -10);
 		return data;
 	}
 
@@ -411,18 +456,16 @@ public class AdminApplication implements IEntryPoint, IAdminUi {
 	@Override
 	public int createUI() {
 
-		final Display display = new Display();
-		final Shell shell = createMainShell(display);
-		shell.setLayout(new FillLayout());
-		final ScrolledComposite scrolledArea = createScrolledArea(shell);
+		mShell.setLayout(new FillLayout());
+		final ScrolledComposite scrolledArea = createScrolledArea(mShell);
 		final Composite content = createContent(scrolledArea);
 		scrolledArea.setContent(content);
 		attachHistoryListener();
-		shell.open();
+		mShell.open();
 
 		openInitialPage();
 
-		display.disposeExec(new Runnable() {
+		mDisplay.disposeExec(new Runnable() {
 			@Override
 			public void run() {
 				if (null != currentPage) {
@@ -462,10 +505,10 @@ public class AdminApplication implements IEntryPoint, IAdminUi {
 				return;
 			}
 
-			if (page == currentPage) {
+			if (page == currentPage)
 				// don't do anything if it's the same page
 				return;
-			} else if (null != currentPage) {
+			else if (null != currentPage) {
 				// deactivate old page first
 				deactivate(currentPage);
 			}
@@ -481,13 +524,11 @@ public class AdminApplication implements IEntryPoint, IAdminUi {
 
 	@Override
 	public void openPage(final String pageId, final String[] args) {
-		if (StringUtils.isBlank(pageId)) {
+		if (StringUtils.isBlank(pageId))
 			throw new IllegalArgumentException("invalid page id");
-		}
 		final PageContribution contribution = AdminPageRegistry.getInstance().getPage(pageId);
-		if (contribution == null) {
+		if (contribution == null)
 			return;
-		}
 
 		final String[] argsWithPageId;
 		if (args != null) {

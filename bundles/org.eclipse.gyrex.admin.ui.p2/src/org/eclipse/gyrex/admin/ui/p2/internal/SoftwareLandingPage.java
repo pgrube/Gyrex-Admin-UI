@@ -24,6 +24,7 @@ import org.eclipse.gyrex.p2.internal.repositories.IRepositoryDefinitionManager;
 
 import org.eclipse.core.runtime.Platform;
 import org.eclipse.jface.layout.GridDataFactory;
+import org.eclipse.jface.viewers.ArrayContentProvider;
 import org.eclipse.jface.viewers.IOpenListener;
 import org.eclipse.jface.viewers.ISelectionChangedListener;
 import org.eclipse.jface.viewers.IStructuredSelection;
@@ -32,6 +33,7 @@ import org.eclipse.jface.viewers.OpenEvent;
 import org.eclipse.jface.viewers.SelectionChangedEvent;
 import org.eclipse.jface.viewers.StructuredSelection;
 import org.eclipse.jface.window.Window;
+import org.eclipse.rwt.lifecycle.UICallBack;
 import org.eclipse.rwt.widgets.DialogCallback;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.SelectionAdapter;
@@ -56,11 +58,17 @@ public class SoftwareLandingPage extends AdminPage {
 
 	private ISelectionChangedListener updateButtonsListener;
 	private ListViewer packagesViewer;
+	private ListViewer installState;
 	private Button addButton;
 	private Button editButton;
 	private Button removeButton;
 	private Button provisionButton;
 	private Button revokeButton;
+	private Button refreshButton;
+	private Button clearButton;
+
+	private InstallState inst;
+	UpdateSimulationTestThread zwThread;
 
 	/**
 	 * Creates a new instance.
@@ -87,12 +95,9 @@ public class SoftwareLandingPage extends AdminPage {
 		}
 	}
 
-	void addButtonPressed() {
+	private void addButtonPressed() {
 		final EditPackageDialog dialog = new EditPackageDialog(SwtUtil.getShell(addButton), getPackageManager(), null);
 		dialog.openNonBlocking(new DialogCallback() {
-			/** serialVersionUID */
-			private static final long serialVersionUID = 1L;
-
 			@Override
 			public void dialogClosed(final int returnCode) {
 				if (returnCode == Window.OK) {
@@ -100,6 +105,10 @@ public class SoftwareLandingPage extends AdminPage {
 				}
 			}
 		});
+	}
+
+	private void clearButtonPressed() {
+		installState.setInput(new Object[0]);
 	}
 
 	private Button createButton(final Composite buttons, final String buttonLabel) {
@@ -112,9 +121,6 @@ public class SoftwareLandingPage extends AdminPage {
 	protected void createButtons(final Composite buttonsPanel) {
 		addButton = createButton(buttonsPanel, "Add...");
 		addButton.addSelectionListener(new SelectionAdapter() {
-			/** serialVersionUID */
-			private static final long serialVersionUID = 1L;
-
 			@Override
 			public void widgetSelected(final SelectionEvent e) {
 				addButtonPressed();
@@ -123,9 +129,6 @@ public class SoftwareLandingPage extends AdminPage {
 
 		editButton = createButton(buttonsPanel, "Edit...");
 		editButton.addSelectionListener(new SelectionAdapter() {
-			/** serialVersionUID */
-			private static final long serialVersionUID = 1L;
-
 			@Override
 			public void widgetSelected(final SelectionEvent e) {
 				editSelectedPackage();
@@ -134,9 +137,6 @@ public class SoftwareLandingPage extends AdminPage {
 
 		removeButton = createButton(buttonsPanel, "Remove...");
 		removeButton.addSelectionListener(new SelectionAdapter() {
-			/** serialVersionUID */
-			private static final long serialVersionUID = 1L;
-
 			@Override
 			public void widgetSelected(final SelectionEvent e) {
 				removeButtonPressed();
@@ -147,9 +147,6 @@ public class SoftwareLandingPage extends AdminPage {
 
 		provisionButton = createButton(buttonsPanel, "Provision");
 		provisionButton.addSelectionListener(new SelectionAdapter() {
-			/** serialVersionUID */
-			private static final long serialVersionUID = 1L;
-
 			@Override
 			public void widgetSelected(final SelectionEvent e) {
 				provisionButtonPressed();
@@ -158,9 +155,6 @@ public class SoftwareLandingPage extends AdminPage {
 
 		revokeButton = createButton(buttonsPanel, "Revoke");
 		revokeButton.addSelectionListener(new SelectionAdapter() {
-			/** serialVersionUID */
-			private static final long serialVersionUID = 1L;
-
 			@Override
 			public void widgetSelected(final SelectionEvent e) {
 				revokeButtonPressed();
@@ -191,9 +185,6 @@ public class SoftwareLandingPage extends AdminPage {
 		manageRepos.setLayoutData(new GridData(SWT.RIGHT, SWT.CENTER, false, false));
 		manageRepos.moveAbove(null);
 		manageRepos.addSelectionListener(new SelectionAdapter() {
-			/** serialVersionUID */
-			private static final long serialVersionUID = 1L;
-
 			@Override
 			public void widgetSelected(final SelectionEvent e) {
 				editRepositoriesList();
@@ -225,7 +216,43 @@ public class SoftwareLandingPage extends AdminPage {
 		buttons.setLayout(new GridLayout());
 		createButtons(buttons);
 
+//composite install adds more buttons to test thread behavior and popup dialogs
+
+		final Composite install = new Composite(pageComposite, SWT.NONE);
+		final GridData igd = AdminUiUtil.createFillData();
+		igd.verticalIndent = 10;
+		install.setLayoutData(igd);
+		install.setLayout(AdminUiUtil.createGridLayoutWithoutMargin(2, false));
+
+		installState = new ListViewer(install, SWT.BORDER | SWT.SINGLE | SWT.H_SCROLL | SWT.V_SCROLL);
+		final List listInstall = installState.getList();
+		listInstall.setLayoutData(GridDataFactory.fillDefaults().grab(true, true).create());
+
+		installState.setContentProvider(new ArrayContentProvider());
+		installState.setLabelProvider(new P2UiLabelProvider());
+
+		refreshButton = createButton(install, "Refresh");
+		refreshButton.addSelectionListener(new SelectionAdapter() {
+			@Override
+			public void widgetSelected(final SelectionEvent e) {
+				refreshButtonPressed();
+			}
+		});
+
+		clearButton = createButton(install, "Clear");
+		clearButton.addSelectionListener(new SelectionAdapter() {
+			@Override
+			public void widgetSelected(final SelectionEvent e) {
+				clearButtonPressed();
+			}
+		});
+//tests up to this point
+
 		updateButtons();
+
+		UICallBack.activate(InstallState.INSTALL_STATE_ID);
+		inst = new InstallState(pageComposite.getDisplay());
+		inst.start();
 
 		return pageComposite;
 	}
@@ -234,7 +261,7 @@ public class SoftwareLandingPage extends AdminPage {
 	public void deactivate() {
 		super.deactivate();
 
-		if (packagesViewer != null) {
+		if ((packagesViewer != null)) {
 			if (updateButtonsListener != null) {
 				packagesViewer.removeSelectionChangedListener(updateButtonsListener);
 				updateButtonsListener = null;
@@ -248,9 +275,6 @@ public class SoftwareLandingPage extends AdminPage {
 	void editRepositoriesList() {
 		final RepositoriesListDialog dialog = new RepositoriesListDialog(SwtUtil.getShell(manageRepos), getRepoManager());
 		dialog.openNonBlocking(new DialogCallback() {
-			/** serialVersionUID */
-			private static final long serialVersionUID = 1L;
-
 			@Override
 			public void dialogClosed(final int returnCode) {
 				if (returnCode == Window.OK) {
@@ -263,9 +287,6 @@ public class SoftwareLandingPage extends AdminPage {
 	void editSelectedPackage() {
 		final EditPackageDialog dialog = new EditPackageDialog(SwtUtil.getShell(addButton), getPackageManager(), getSelectedPackage());
 		dialog.openNonBlocking(new DialogCallback() {
-			/** serialVersionUID */
-			private static final long serialVersionUID = 1L;
-
 			@Override
 			public void dialogClosed(final int returnCode) {
 				if (returnCode == Window.OK) {
@@ -289,18 +310,16 @@ public class SoftwareLandingPage extends AdminPage {
 
 	private PackageDefinition getSelectedPackage() {
 		final StructuredSelection selection = (StructuredSelection) packagesViewer.getSelection();
-		if (!selection.isEmpty() && selection.getFirstElement() instanceof PackageDefinition) {
+		if (!selection.isEmpty() && (selection.getFirstElement() instanceof PackageDefinition))
 			return (PackageDefinition) selection.getFirstElement();
-		}
 
 		return null;
 	}
 
 	void provisionButtonPressed() {
 		final PackageDefinition pkg = getSelectedPackage();
-		if (pkg == null) {
+		if (pkg == null)
 			return;
-		}
 
 		getPackageManager().markedForInstall(pkg);
 		refresh();
@@ -310,16 +329,21 @@ public class SoftwareLandingPage extends AdminPage {
 		packagesViewer.refresh();
 	}
 
+	/*
+	 * only for testing purposes and dialog update simulation
+	 */
+	void refreshButtonPressed() {
+		UICallBack.activate(UpdateSimulationTestThread.TEST_ID);
+		zwThread = new UpdateSimulationTestThread(pageComposite.getDisplay());
+		zwThread.start();
+	}
+
 	void removeButtonPressed() {
 		final PackageDefinition pkg = getSelectedPackage();
-		if (pkg == null) {
+		if (pkg == null)
 			return;
-		}
 
 		NonBlockingMessageDialogs.openQuestion(SwtUtil.getShell(removeButton), "Remove Package", "Do you really want to delete the package?", new DialogCallback() {
-			/** serialVersionUID */
-			private static final long serialVersionUID = 1L;
-
 			@Override
 			public void dialogClosed(final int returnCode) {
 				if (returnCode == Window.OK) {
@@ -332,9 +356,8 @@ public class SoftwareLandingPage extends AdminPage {
 
 	void revokeButtonPressed() {
 		final PackageDefinition pkg = getSelectedPackage();
-		if (pkg == null) {
+		if (pkg == null)
 			return;
-		}
 
 		getPackageManager().markedForUninstall(pkg);
 		refresh();
@@ -356,9 +379,8 @@ public class SoftwareLandingPage extends AdminPage {
 		markedforInstall |= getPackageManager().isMarkedForInstall(getSelectedPackage());
 		markedforUninstall |= !getPackageManager().isMarkedForInstall(getSelectedPackage());
 
-		if (markedforInstall && markedforUninstall) {
+		if (markedforInstall && markedforUninstall)
 			return;
-		}
 
 		provisionButton.setEnabled(markedforUninstall);
 		revokeButton.setEnabled(markedforInstall);
